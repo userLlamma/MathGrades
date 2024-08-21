@@ -1,0 +1,7 @@
+{
+  "scripts": {
+  },
+  "devDependencies": {
+    "firebase": "^10.13.0"
+  }
+}
