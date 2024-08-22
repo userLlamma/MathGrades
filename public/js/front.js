@@ -122,11 +122,36 @@ uploadButton.addEventListener('click', async () => {
         console.log('Grading result:', gradeResult.data);
 
 
-        // Display result
-        resultDiv.innerHTML = `
-            <h2>Grade: ${gradeResult.data.grade}</h2>
-            <p>Feedback: ${gradeResult.data.feedback}</p>
-        `;
+        // 清空之前的结果
+        resultDiv.innerHTML = '';
+
+        // 添加评分和反馈
+        const gradeHeader = document.createElement('h2');
+        gradeHeader.textContent = `Grade: ${gradeResult.data.grade}`;
+        resultDiv.appendChild(gradeHeader);
+
+        const feedbackParagraph = document.createElement('p');
+        feedbackParagraph.textContent = `Feedback: ${gradeResult.data.feedback}`;
+        resultDiv.appendChild(feedbackParagraph);
+
+        // 创建并添加OCR结果的下载链接
+        console.log("gradeResult.data.ocrResult="+gradeResult.data.ocrResult);
+        if (gradeResult.data.ocrResult) {
+            const blob = new Blob([gradeResult.data.ocrResult], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const downloadLink = document.createElement('a');
+            downloadLink.href = url;
+            downloadLink.download = 'ocr_result.txt';
+            downloadLink.textContent = 'Download OCR Result';
+            
+            resultDiv.appendChild(document.createElement('br'));
+            resultDiv.appendChild(downloadLink);
+
+            // 清理 URL 对象
+            downloadLink.onclick = () => {
+                setTimeout(() => URL.revokeObjectURL(url), 100);
+            };
+        }
     } catch (error) {
         console.error('Error:', error);
         resultDiv.innerHTML = `<p>Error: ${error.message}</p>`;

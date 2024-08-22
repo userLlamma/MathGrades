@@ -5,6 +5,7 @@ import * as math from 'mathjs';
 import cors from 'cors';
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from 'dotenv';
+import { createWorker } from 'tesseract.js';
 
 admin.initializeApp();
 
@@ -27,6 +28,11 @@ interface RequestBody {
   };
 }
 
+interface EvaluationResult {
+  grade: number;
+  feedback: string;
+}
+
 export const gradeHomework = functions.https.onRequest((req, res) => {
   return corsHandler(req, res, async () => {
     console.log('Received request:', req.body);
@@ -36,10 +42,12 @@ export const gradeHomework = functions.https.onRequest((req, res) => {
     console.log('Extracted imageUrl:', imageUrl);
     console.log('Using Claude API:', useClaudeApi);
 
-    try {
-      let grade: number;
-      let feedback: string;
+    let ocrResult: string = '';
+    let grade: number;
+    let feedback: string;
 
+    try {
+    
       if (useClaudeApi) {
         // 使用Claude API处理
         console.log('Using Claude API to analyze image:', imageUrl);
@@ -83,17 +91,18 @@ export const gradeHomework = functions.https.onRequest((req, res) => {
       } else {
         // 使用原有的OCR流程
         console.log('Performing OCR on image:', imageUrl);
-        const detectedText = await performOCR(imageUrl);
+        ocrResult = await performOCR(imageUrl);
 
-        if (!detectedText) {
+        if (!ocrResult) {
           console.error('No text detected in the image');
           throw new Error('No text detected in the image');
         }
 
-        console.log('Detected text:', detectedText);
-        grade = evaluateMathExpression(detectedText);
+        console.log('Detected text:', ocrResult);
+        const result = evaluateMathExpression(ocrResult);
+        grade = result.grade;
+        feedback = result.feedback;
         console.log('Calculated grade:', grade);
-        feedback = generateFeedback(grade);
       }
 
       console.log('Generated feedback:', feedback);
@@ -103,11 +112,13 @@ export const gradeHomework = functions.https.onRequest((req, res) => {
         imageUrl,
         grade,
         feedback,
+        ocrResult,
         timestamp: FieldValue.serverTimestamp(),
       });
       console.log('Stored result in Firestore with ID:', docRef.id);
+      console.log('ocrResult:', ocrResult);
 
-      res.json({ data: { grade, feedback } });
+      res.json({ data: { grade, feedback, ocrResult } });
     } catch (error) {
       console.error('Error processing homework:', error);
       res.status(500).json({
@@ -118,60 +129,113 @@ export const gradeHomework = functions.https.onRequest((req, res) => {
   });
 });
 
+
 async function performOCR(imageUrl: string): Promise<string> {
-  console.log('Starting OCR process for image:', imageUrl);
-  await delay(2000);
-  console.log('OCR process completed');
-  return '(12+5)*12=';
+  console.log('Starting Math OCR process for image:', imageUrl);
+  
+  const worker = await createWorker(['eng', 'chi_sim']);
+  
+  try {
+   
+    const { data: { text } } = await worker.recognize(imageUrl);
+    
+    console.log('Math OCR process completed');
+    
+    return text;
+  } finally {
+    await worker.terminate();
+  }
 }
 
+
+
+// @ts-ignore
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function evaluateMathExpression(expression: string): number {
-  console.log('Evaluating math expression:', expression);
-  try {
-    // 移除所有空格
-    expression = expression.replace(/\s/g, '');
-    
-    // 检查是否有等号，并分割表达式
-    const parts = expression.split('=');
-    const leftSide = parts[0];
-    const rightSide = parts[1];
-
-    // 评估左侧的表达式
-    const result = math.evaluate(leftSide);
-    console.log('Evaluation result:', result);
-
-    // 如果有右侧（即原始表达式中有等号），则比较结果
-    if (rightSide !== undefined) {
-      const expectedResult = parseFloat(rightSide);
-      if (Math.abs(result - expectedResult) < 0.0001) { // 使用小的误差范围进行比较
-        console.log('Expression is correct');
-        return 100; // 或者其他表示正确的分数
-      } else {
-        console.log('Expression is incorrect');
-        return 0; // 或者根据你的评分标准返回一个分数
+function evaluateMathExpression(input: string): EvaluationResult {
+  console.log('Evaluating math expressions:', input);
+  
+  // 移除多余的空白字符
+  input = input.replace(/\s+/g, ' ').trim();
+  
+  // 如果输入为空，返回 0 分
+  if (!input) {
+      console.log('Empty input');
+      return { grade: 0, feedback: "未能识别到任何内容。" };
+  }
+  
+  // 分割输入为单独的行或表达式
+  const lines: string[] = input.split(/[,;\n]+/);
+  
+  let totalGrade: number = 0;
+  let totalExpressions: number = 0;
+  let feedbacks: string[] = [];
+  
+  for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+      
+      try {
+          // 尝试匹配等式或不等式
+          const match: RegExpMatchArray | null = line.match(/^(.+?)(=|!=|<=|>=|<|>)(.+)$/);
+          
+          if (match) {
+              const [, leftSide, operator, rightSide] = match;
+              const leftResult: number = math.evaluate(leftSide);
+              const rightResult: number = math.evaluate(rightSide);
+              
+              let isCorrect: boolean = false;
+              switch (operator) {
+                  case '=': isCorrect = Math.abs(leftResult - rightResult) < 0.0001; break;
+                  case '!=': isCorrect = leftResult !== rightResult; break;
+                  case '<': isCorrect = leftResult < rightResult; break;
+                  case '<=': isCorrect = leftResult <= rightResult; break;
+                  case '>': isCorrect = leftResult > rightResult; break;
+                  case '>=': isCorrect = leftResult >= rightResult; break;
+              }
+              
+              if (isCorrect) {
+                  totalGrade += 100;
+                  feedbacks.push(`表达式 "${line}" 正确！`);
+              } else {
+                  feedbacks.push(`表达式 "${line}" 不正确。左边 = ${leftResult}，右边 = ${rightResult}`);
+              }
+              totalExpressions++;
+          } 
+          else {
+              // 尝试直接计算表达式
+              const result: number = math.evaluate(line);
+              feedbacks.push(`表达式 "${line}" 的计算结果是 ${result}。`);
+              totalGrade += 50;  // 给予部分分数，因为我们不确定预期结果
+              totalExpressions++;
+          }
+      } catch (error) {
+          console.error('Error evaluating expression:', line, error);
+          
+          // 尝试提取数字
+          const numbers: string[] | null = line.match(/[-+]?\d*\.?\d+/g);
+          if (numbers && numbers.length > 0) {
+              const sum: number = numbers.reduce((acc, num) => acc + parseFloat(num), 0);
+              feedbacks.push(`在 "${line}" 中找到了以下数字：${numbers.join(', ')}。这些数字的和是 ${sum}。`);
+              totalGrade += 25;  // 给予少量分数
+              totalExpressions++;
+          } else {
+              feedbacks.push(`无法解析 "${line}" 为数学表达式。`);
+          }
       }
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Error evaluating math expression:', error);
-    throw new Error('Invalid math expression');
   }
+  
+  // 计算平均分
+  const averageGrade: number = totalExpressions > 0 ? Math.round(totalGrade / totalExpressions) : 0;
+  
+  // 组合反馈
+  const combinedFeedback: string = feedbacks.join('\n');
+  
+  return { 
+      grade: averageGrade, 
+      feedback: `总体得分：${averageGrade}\n\n详细反馈：\n${combinedFeedback}` 
+  };
 }
 
-function generateFeedback(grade: number): string {
-  console.log('Generating feedback for grade:', grade);
-  if (grade >= 90) {
-    return 'Excellent work! Keep it up!';
-  } else if (grade >= 80) {
-    return 'Good job! There\'s room for improvement.';
-  } else if (grade >= 70) {
-    return 'You\'re on the right track. Keep practicing!';
-  } else {
-    return 'Let\'s review this together. Don\'t give up!';
-  }
-}
