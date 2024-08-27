@@ -1,0 +1,17 @@
+# Use the AWS Lambda Node.js 18 base image
+FROM public.ecr.aws/lambda/nodejs:18
+
+# Set the working directory
+WORKDIR /var/task
+
+# Copy package.json and package-lock.json
+COPY package.json package-lock.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy the rest of the application code
+COPY . .
+
+# Set the CMD to your handler
+CMD [ "index.handler" ]

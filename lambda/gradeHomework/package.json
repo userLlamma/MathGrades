@@ -1,0 +1,16 @@
+{
+    "name": "math-homework-grader",
+    "version": "1.0.0",
+    "description": "AWS Lambda function for grading math homework",
+    "main": "index.js",
+    "scripts": {
+      "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "dependencies": {
+      "@anthropic-ai/sdk": "^0.26.1",
+      "@supabase/supabase-js": "^2.39.6",
+      "mathjs": "^13.0.2",
+      "tesseract.js": "^5.1.0",
+      "node-fetch": "^3.3.2"
+    }
+  }
