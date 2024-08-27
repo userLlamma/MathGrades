@@ -1,5 +1,6 @@
 // 假设你的 Lambda 函数通过 API Gateway 暴露，URL 类似于：
-const LAMBDA_API_URL = 'https://f7ouk5lep52mbgp763v43gvpzq0vpgng.lambda-url.us-east-1.on.aws';
+//const LAMBDA_API_URL = 'https://f7ouk5lep52mbgp763v43gvpzq0vpgng.lambda-url.us-east-1.on.aws';
+const LAMBDA_API_URL = 'http://127.0.0.1:3000/grade-homework';
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
