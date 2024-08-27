@@ -1,4 +1,14 @@
-import { functions, storage, auth, ref, uploadBytes, getDownloadURL, httpsCallable, createUserWithEmailAndPassword, signInWithEmailAndPassword  } from './firebase-config.js';
+// 假设你的 Lambda 函数通过 API Gateway 暴露，URL 类似于：
+const LAMBDA_API_URL = 'https://f7ouk5lep52mbgp763v43gvpzq0vpgng.lambda-url.us-east-1.on.aws';
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const supabase_url='https://ugypcazwqbdkqzuyqvju.supabase.co';
+const supabase_anon_key='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVneXBjYXp3cWJka3F6dXlxdmp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjQyMjcyNjksImV4cCI6MjAzOTgwMzI2OX0.DwwfbfKYtfnulfMpWoNeEr0XsXONhbhAyqxhCy73sPw';
+const supabase = createClient(
+    supabase_url,
+    supabase_anon_key
+);
 
 
 
@@ -21,53 +31,59 @@ const uploadButton = document.getElementById('uploadButton');
 const resultDiv = document.getElementById('result');
 const useClaudeApiCheckbox = document.getElementById('useClaudeApi');
 
-// 登录功能
-loginButton.addEventListener('click', () => {
+// Login functionality
+loginButton.addEventListener('click', async () => {
     const email = loginEmail.value;
     const password = loginPassword.value;
-    signInWithEmailAndPassword(auth, email, password)
-        .then((userCredential) => {
-            console.log('Login successful');
-            showHomeworkSection();
-        })
-        .catch((error) => {
-            console.error('Login error:', error);
-            alert('Login failed: ' + error.message);
-        });
+    
+    const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+    })
+
+    if (error) {
+        console.error('Login error:', error);
+        alert('Login failed: ' + error.message);
+    } else {
+        console.log('Login successful');
+        showHomeworkSection();
+    }
 });
 
-// 注册功能
-registerButton.addEventListener('click', () => {
+// Registration functionality
+registerButton.addEventListener('click', async () => {
     const email = registerEmail.value;
     const password = registerPassword.value;
 
-    createUserWithEmailAndPassword(auth, email, password)
-        .then((userCredential) => {
-            console.log('Registration successful');
-            showHomeworkSection();
-        })
-        .catch((error) => {
-            console.error('Registration error:', error);
-            alert('Registration failed: ' + error.message);
-        });
+    const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+    })
+
+    if (error) {
+        console.error('Registration error:', error);
+        alert('Registration failed: ' + error.message);
+    } else {
+        console.log('Registration successful');
+        showHomeworkSection();
+    }
 });
 
-// 登出功能
-logoutButton.addEventListener('click', () => {
-    auth.signOut()
-        .then(() => {
-            console.log('Logout successful');
-            showLoginRegisterSections();
-        })
-        .catch((error) => {
-            console.error('Logout error:', error);
-        });
+// Logout functionality
+logoutButton.addEventListener('click', async () => {
+    const { error } = await supabase.auth.signOut()
+
+    if (error) {
+        console.error('Logout error:', error);
+    } else {
+        console.log('Logout successful');
+        showLoginRegisterSections();
+    }
 });
 
-
-// 监听认证状态变化
-auth.onAuthStateChanged((user) => {
-    if (user) {
+// Listen for authentication state changes
+supabase.auth.onAuthStateChange((event, session) => {
+    if (session) {
         showHomeworkSection();
     } else {
         showLoginRegisterSections();
@@ -91,6 +107,34 @@ function showLoginRegisterSections() {
 }
 
 
+// 函数来调用 Lambda
+async function callLambdaFunction(imageUrl, useClaudeApi) {
+    try {
+      const response = await fetch(LAMBDA_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // 如果需要认证，可能还需要添加 Authorization 头
+          'Authorization': 'Bearer your-token-here'
+        },
+        body: JSON.stringify({
+          imageUrl,
+          useClaudeApi
+        })
+      });
+  
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+  
+      const gradeResult = await response.json();
+      return gradeResult;
+    } catch (error) {
+      console.error("Error calling Lambda function:", error);
+      throw error;
+    }
+}
+  
 uploadButton.addEventListener('click', async () => {
     const file = imageUpload.files[0];
     if (!file) {
@@ -101,49 +145,52 @@ uploadButton.addEventListener('click', async () => {
     try {
         // 创建一个唯一的文件名
         const fileName = `homework_${new Date().getTime()}_${file.name}`;
-        console.log('fileName='+fileName);
-        const storageRef = ref(storage, 'homework/' + fileName);
+        console.log('fileName=' + fileName);
 
-        // 上传文件到 Firebase Storage
-        console.log('before uploadBytes');
-        const snapshot = await uploadBytes(storageRef, file);
+        // 上传文件到 Supabase Storage
+        const { data, error } = await supabase.storage
+            .from('homework')
+            .upload(fileName, file);
+
+        if (error) throw error;
+
         console.log('Uploaded a file!');
 
         // 获取下载 URL
-        const imageUrl = await getDownloadURL(snapshot.ref);
+        const { data: { publicUrl: imageUrl } } = supabase.storage
+            .from('homework')
+            .getPublicUrl(fileName);
+
         console.log('File available at', imageUrl);
 
-        // 使用上传后的图片URL调用作业评分API
-        const gradeHomework = httpsCallable(functions, 'gradeHomework');
-        const gradeResult = await gradeHomework({ 
-            imageUrl, 
-            useClaudeApi: useClaudeApiCheckbox.checked // 添加这个选项
-        });
-        console.log('Grading result:', gradeResult.data);
+        // 使用上传后的图片URL调用作业评分
+        // 调用 Lambda 函数
+        const gradeResult = await callLambdaFunction(imageUrl, useClaudeApiCheckbox.checked);
 
+        console.log('Grading result:', gradeResult);
 
         // 清空之前的结果
         resultDiv.innerHTML = '';
 
         // 添加评分和反馈
         const gradeHeader = document.createElement('h2');
-        gradeHeader.textContent = `Grade: ${gradeResult.data.grade}`;
+        gradeHeader.textContent = `Grade: ${gradeResult.grade}`;
         resultDiv.appendChild(gradeHeader);
 
         const feedbackParagraph = document.createElement('p');
-        feedbackParagraph.textContent = `Feedback: ${gradeResult.data.feedback}`;
+        feedbackParagraph.textContent = `Feedback: ${gradeResult.feedback}`;
         resultDiv.appendChild(feedbackParagraph);
 
         // 创建并添加OCR结果的下载链接
-        console.log("gradeResult.data.ocrResult="+gradeResult.data.ocrResult);
-        if (gradeResult.data.ocrResult) {
-            const blob = new Blob([gradeResult.data.ocrResult], { type: 'text/plain' });
+        console.log("gradeResult.ocrResult=" + gradeResult.ocrResult);
+        if (gradeResult.ocrResult) {
+            const blob = new Blob([gradeResult.ocrResult], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             const downloadLink = document.createElement('a');
             downloadLink.href = url;
             downloadLink.download = 'ocr_result.txt';
             downloadLink.textContent = 'Download OCR Result';
-            
+
             resultDiv.appendChild(document.createElement('br'));
             resultDiv.appendChild(downloadLink);
 

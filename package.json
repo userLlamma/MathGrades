@@ -1,7 +1,11 @@
 {
   "scripts": {
+    "supabase": "supabase"
   },
   "devDependencies": {
-    "firebase": "^10.13.0"
+    "supabase": "^1.190.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.2"
   }
 }
