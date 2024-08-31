@@ -1,6 +1,6 @@
 // 假设你的 Lambda 函数通过 API Gateway 暴露，URL 类似于：
 //const LAMBDA_API_URL = 'https://f7ouk5lep52mbgp763v43gvpzq0vpgng.lambda-url.us-east-1.on.aws';
-const LAMBDA_API_URL = 'http://127.0.0.1:3000/grade-homework';
+const LAMBDA_API_URL = 'http://192.168.76.31:3000/grade-homework';
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -173,24 +173,24 @@ uploadButton.addEventListener('click', async () => {
         // 调用 Lambda 函数
         const gradeResult = await callLambdaFunction(imageUrl, useClaudeApiCheckbox.checked);
 
-        console.log('Grading result:', gradeResult);
+        console.log('Grading result:', gradeResult.data);
 
         // 清空之前的结果
         resultDiv.innerHTML = '';
 
         // 添加评分和反馈
         const gradeHeader = document.createElement('h2');
-        gradeHeader.textContent = `Grade: ${gradeResult.grade}`;
+        gradeHeader.textContent = `Grade: ${gradeResult.data.grade}`;
         resultDiv.appendChild(gradeHeader);
 
         const feedbackParagraph = document.createElement('p');
-        feedbackParagraph.textContent = `Feedback: ${gradeResult.feedback}`;
+        feedbackParagraph.textContent = `Feedback: ${gradeResult.data.feedback}`;
         resultDiv.appendChild(feedbackParagraph);
 
         // 创建并添加OCR结果的下载链接
-        console.log("gradeResult.ocrResult=" + gradeResult.ocrResult);
-        if (gradeResult.ocrResult) {
-            const blob = new Blob([gradeResult.ocrResult], { type: 'text/plain' });
+        console.log("gradeResult.data.ocrResult=" + gradeResult.data.ocrResult);
+        if (gradeResult.data.ocrResult) {
+            const blob = new Blob([gradeResult.data.ocrResult], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             const downloadLink = document.createElement('a');
             downloadLink.href = url;

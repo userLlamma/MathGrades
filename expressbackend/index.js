@@ -100,21 +100,41 @@ app.post('/grade-homework', async (req, res) => {
 
     console.log("Generated feedback:", feedback);
 
-    const { data, error } = await supabaseClient
-      .from('grades')
-      .insert({
-        image_url: imageUrl,
-        grade,
-        feedback,
-        ocr_result: ocrResult,
-      })
-      .select();
+    try {
+      const { data, error } = await supabaseClient
+        .from('grades')
+        .insert({
+          image_url: imageUrl,
+          grade,
+          feedback,
+          ocr_result: ocrResult,
+        })
+        .select();
+    
+      if (error) throw error;
+    
+      if (!data || data.length === 0) {
+        throw new Error('Data was inserted but not returned.');
+      }
+    
+      console.log('Inserted data:', data[0]);
 
-    if (error) throw error;
+      console.log("Stored result in Supabase with ID:", data[0].id);
 
-    console.log("Stored result in Supabase with ID:", data[0].id);
-
-    res.json({ data: { grade, feedback, ocrResult } });
+      res.json({ data: { grade, feedback, ocrResult } });
+    } catch (error) {
+      console.error('Error inserting grade:', error.message);
+      // 根据错误类型提供更具体的错误信息
+      if (error.code === '23505') {
+        console.error('Unique constraint violated. This record may already exist.');
+      } else if (error.code === '42501') {
+        console.error('Permission denied. Check your table permissions.');
+      } else if (error.code === '23502') {
+        console.error('Not null constraint violated. Check if all required fields are provided.');
+      }
+      // 可以选择重新抛出错误或返回一个错误对象
+      throw error;
+    }
   } catch (error) {
     console.error("Error processing homework:", error);
     res.status(500).json({ error: "Internal server error", details: error.message });
@@ -134,8 +154,8 @@ async function performOCR(imageUrl) {
         // Extract bucket and file path from the URL
         const url = new URL(imageUrl)
         const pathParts = url.pathname.split('/')
-        const bucketName = pathParts[1]
-        const filePath = pathParts.slice(2).join('/')
+        const bucketName = pathParts[5]
+        const filePath = pathParts.slice(6).join('/')
         console.log("url="+url);
         console.log("pathParts="+pathParts);
         console.log("bucketName="+bucketName);
@@ -152,14 +172,15 @@ async function performOCR(imageUrl) {
         }
 
         // Convert the downloaded data to a Blob
-        const blob = new Blob([data], { type: 'image/jpeg' })
+        // Convert the downloaded data to a Buffer
+        const buffer = Buffer.from(await data.arrayBuffer());
 
         // Initialize Tesseract worker
         const worker = await createWorker(['eng', 'chi_sim'])
 
         try {
             // Perform OCR
-            const { data: { text } } = await worker.recognize(blob)
+            const { data: { text } } = await worker.recognize(buffer)
             console.log("OCR process completed")
             return text
         } finally {
@@ -172,103 +193,118 @@ async function performOCR(imageUrl) {
 }
 
 function evaluateMathExpression(input) {
-    console.log("Evaluating math expressions:", input);
-  
-    // Remove extra whitespace
-    input = input.replace(/\s+/g, " ").trim();
-  
-    if (!input) {
-      console.log("Empty input");
-      return { grade: 0, feedback: "未能识别到任何内容。" };
-    }
-  
-    const lines = input.split(/[,;\n]+/);
-  
-    let totalGrade = 0;
-    let totalExpressions = 0;
-    const feedbacks = [];
-  
-    for (let line of lines) {
-      line = line.trim();
-      if (!line) continue;
-  
-      try {
-        const match = line.match(/^(.+?)(=|!=|<=|>=|<|>)(.+)$/);
-  
-        if (match) {
-          const [, leftSide, operator, rightSide] = match;
-          const leftResult = evaluate(leftSide);
-          const rightResult = evaluate(rightSide);
-  
-          let isCorrect = false;
-  
-          switch (operator) {
-            case "=":
-              isCorrect = Math.abs(leftResult - rightResult) < 0.0001;
-              break;
-            case "!=":
-              isCorrect = leftResult !== rightResult;
-              break;
-            case "<":
-              isCorrect = leftResult < rightResult;
-              break;
-            case "<=":
-              isCorrect = leftResult <= rightSide;
-              break;
-            case ">":
-              isCorrect = leftResult > rightResult;
-              break;
-            case ">=":
-              isCorrect = leftResult >= rightResult;
-              break;
-          }
-  
-          if (isCorrect) {
-            totalGrade += 100;
-            feedbacks.push(`表达式 "${line}" 正确！`);
-          } else {
-            feedbacks.push(
-              `表达式 "${line}" 不正确。` +
-              `左边 = ${leftResult}，右边 = ${rightResult}`
-            );
-          }
-          totalExpressions++;
+  console.log("Evaluating expressions:", input);
+
+  // 移除额外的空白字符
+  input = input.replace(/\s+/g, " ").trim();
+
+  if (!input) {
+    console.log("Empty input");
+    return { grade: 0, feedback: "未能识别到任何内容。" };
+  }
+
+  // 使用更灵活的分隔符
+  const lines = input.split(/[,;\n]+/).filter(line => line.trim());
+
+  let totalGrade = 0;
+  let totalExpressions = 0;
+  const feedbacks = [];
+
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+
+    try {
+      // 尝试匹配数学表达式
+      const match = line.match(/^(.+?)(=|!=|<=|>=|<|>)(.+)$/);
+
+      if (match) {
+        const [, leftSide, operator, rightSide] = match;
+        let leftResult, rightResult;
+
+        try {
+          leftResult = evaluate(leftSide);
+          rightResult = evaluate(rightSide);
+        } catch (evalError) {
+          throw new Error("无法评估表达式的一部分或全部");
+        }
+
+        let isCorrect = false;
+
+        switch (operator) {
+          case "=":
+            isCorrect = Math.abs(leftResult - rightResult) < 0.0001;
+            break;
+          case "!=":
+            isCorrect = Math.abs(leftResult - rightResult) >= 0.0001;
+            break;
+          case "<":
+            isCorrect = leftResult < rightResult;
+            break;
+          case "<=":
+            isCorrect = leftResult <= rightResult;
+            break;
+          case ">":
+            isCorrect = leftResult > rightResult;
+            break;
+          case ">=":
+            isCorrect = leftResult >= rightResult;
+            break;
+        }
+
+        if (isCorrect) {
+          totalGrade += 100;
+          feedbacks.push(`表达式 "${line}" 正确！`);
         } else {
+          feedbacks.push(
+            `表达式 "${line}" 不正确。` +
+            `左边 = ${leftResult}，右边 = ${rightResult}`
+          );
+        }
+        totalExpressions++;
+      } else {
+        // 尝试评估单个表达式
+        try {
           const result = evaluate(line);
           feedbacks.push(`表达式 "${line}" 的计算结果是 ${result}。`);
           totalGrade += 50;
           totalExpressions++;
-        }
-      } catch (error) {
-        console.error("Error evaluating expression:", line, error);
-  
-        const numbers = line.match(/[-+]?\d*\.?\d+/g);
-        if (numbers && numbers.length > 0) {
-          const sum = numbers.reduce(
-            (acc, num) => acc + parseFloat(num), 0
-          );
-          feedbacks.push(
-            `在 "${line}" 中找到了以下数字：${numbers.join(", ")}。` +
-            `这些数字的和是 ${sum}。`
-          );
-          totalGrade += 25;
-          totalExpressions++;
-        } else {
-          feedbacks.push(`无法解析 "${line}" 为数学表达式。`);
+        } catch (evalError) {
+          throw new Error("无法评估表达式");
         }
       }
+    } catch (error) {
+      console.error("Error evaluating expression:", line, error);
+
+      // 尝试从文本中提取数字
+      const numbers = line.match(/[-+]?\d*\.?\d+/g);
+      if (numbers && numbers.length > 0) {
+        const sum = numbers.reduce(
+          (acc, num) => acc + parseFloat(num), 0
+        );
+        feedbacks.push(
+          `在 "${line}" 中找到了以下数字：${numbers.join(", ")}。` +
+          `这些数字的和是 ${sum}。`
+        );
+        totalGrade += 25;
+        totalExpressions++;
+      } else {
+        // 如果没有找到数字，将其视为普通文本
+        feedbacks.push(`"${line}" 似乎是文本内容，而非数学表达式。`);
+      }
     }
-  
-    const averageGrade =
-      totalExpressions > 0 ? Math.round(totalGrade / totalExpressions) : 0;
-  
-    const combinedFeedback = feedbacks.join("\n");
-  
-    return {
-      grade: averageGrade,
-      feedback: `总体得分：${averageGrade}\n\n详细反馈：\n${combinedFeedback}`,
-    };
   }
+
+  const averageGrade =
+    totalExpressions > 0 ? Math.round(totalGrade / totalExpressions) : 0;
+
+  const combinedFeedback = feedbacks.join("\n");
+
+  return {
+    grade: averageGrade,
+    feedback: `总体得分：${averageGrade}\n\n详细反馈：\n${combinedFeedback}`,
+  };
+}
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
