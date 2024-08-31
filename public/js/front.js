@@ -147,22 +147,27 @@ uploadButton.addEventListener('click', async () => {
         // 创建一个唯一的文件名
         const fileName = `homework_${new Date().getTime()}_${file.name}`;
         console.log('fileName=' + fileName);
-
+        const bucketName = 'homework';
+        const expiresIn = 60;
         // 上传文件到 Supabase Storage
-        const { data, error } = await supabase.storage
-            .from('homework')
-            .upload(fileName, file);
+        const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(bucketName)
+        .upload(fileName, file)
 
-        if (error) throw error;
+        if (uploadError) {
+        throw uploadError
+        }
 
-        console.log('Uploaded a file!');
+        console.log('File uploaded successfully:', fileName)
 
-        // 获取下载 URL
+        // 获取已上传文件的签名 URL
         const { data: { publicUrl: imageUrl } } = supabase.storage
-            .from('homework')
-            .getPublicUrl(fileName);
+        .from('homework')
+        .getPublicUrl(fileName);
 
-        console.log('File available at', imageUrl);
+        if (!imageUrl) {
+            throw new Error('Failed to get signed URL')
+        }
 
         // 使用上传后的图片URL调用作业评分
         // 调用 Lambda 函数
